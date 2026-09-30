@@ -43,14 +43,17 @@ button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
   </label>
   <ul id="list"></ul>
 </main>
-<script>
+<script type="module">
+import { upload } from "https://esm.sh/@vercel/blob/client";
+
 var drop=document.getElementById("drop"),input=document.getElementById("file"),list=document.getElementById("list");
-var OK=["image/jpeg","image/png","image/gif","image/webp"],KEY="riwayat_unggahan";
+var EXT={"image/jpeg":".jpg","image/png":".png","image/gif":".gif","image/webp":".webp"},KEY="riwayat_unggahan";
 
 function load(){try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return[]}}
 function save(a){try{localStorage.setItem(KEY,JSON.stringify(a))}catch(e){}}
+function rand(){var a=new Uint8Array(5);crypto.getRandomValues(a);return Array.prototype.map.call(a,function(b){return("0"+b.toString(16)).slice(-2)}).join("")}
 
-function done(li,r,cached){
+function done(li,r){
   var meta=li.querySelector(".meta"),bar=li.querySelector(".bar");
   if(bar)bar.remove();
   meta.className="meta";meta.innerHTML="";
@@ -61,11 +64,11 @@ function done(li,r,cached){
   var d=document.createElement("button");d.type="button";d.textContent="Hapus";
   d.onclick=function(){
     if(!confirm("Hapus gambar ini secara permanen? Link-nya akan mati."))return;
-    fetch("/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:r.filename,token:r.deleteToken})})
+    fetch("/api/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:r.url,token:r.deleteToken})})
     .then(function(x){return x.json().then(function(j){return{ok:x.ok,j:j}})})
     .then(function(x){
       if(!x.ok&&x.j.error!=="File tidak ditemukan.")throw new Error(x.j.error||"Gagal");
-      save(load().filter(function(i){return i.filename!==r.filename}));li.remove();
+      save(load().filter(function(i){return i.url!==r.url}));li.remove();
     }).catch(function(e){meta.textContent=e.message;meta.className="meta err"});
   };
   box.appendChild(c);box.appendChild(d);li.appendChild(box);
@@ -78,22 +81,21 @@ function row(name,src){
   return li;
 }
 
-function send(f){
+async function send(f){
   var li=row(f.name,URL.createObjectURL(f));list.prepend(li);
   var meta=li.querySelector(".meta"),bar=li.querySelector(".bar i");
   function fail(t){meta.textContent=t;meta.className="meta err"}
-  if(OK.indexOf(f.type)<0)return fail("Format tidak didukung");
-  var fd=new FormData();fd.append("file",f);
-  var x=new XMLHttpRequest();x.open("POST","/upload");
-  x.upload.onprogress=function(e){if(e.lengthComputable)bar.style.width=(e.loaded/e.total*100)+"%"};
-  x.onerror=function(){fail("Koneksi gagal")};
-  x.onload=function(){
-    var r={};try{r=JSON.parse(x.responseText)}catch(e){}
-    if(x.status!==200||!r.url)return fail(r.error||"Gagal diunggah");
-    var h=load();h.unshift({url:r.url,filename:r.filename,name:r.name,deleteToken:r.deleteToken});save(h.slice(0,200));
+  if(!EXT[f.type])return fail("Format tidak didukung");
+  if(f.size>20*1024*1024)return fail("Lebih dari 20 MB");
+  try{
+    var blob=await upload(rand()+EXT[f.type],f,{access:"public",handleUploadUrl:"/api/upload",
+      onUploadProgress:function(p){bar.style.width=p.percentage+"%"}});
+    var res=await fetch("/api/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:blob.url,name:f.name})});
+    var r=await res.json();
+    if(!res.ok)return fail(r.error||"Gagal mencatat unggahan");
+    var h=load();h.unshift({url:r.url,name:f.name,deleteToken:r.deleteToken});save(h.slice(0,200));
     done(li,r);
-  };
-  x.send(fd);
+  }catch(e){fail(e.message||"Gagal diunggah")}
 }
 
 function add(files){Array.prototype.forEach.call(files,send)}
@@ -102,7 +104,6 @@ input.onchange=function(){add(input.files);input.value=""};
 ["dragleave","drop"].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.remove("over")})});
 drop.addEventListener("drop",function(ev){add(ev.dataTransfer.files)});
 
-// Riwayat unggahan di browser ini
 load().forEach(function(r){var li=row(r.name,r.url);list.appendChild(li);done(li,r)});
 </script>
 </body>
