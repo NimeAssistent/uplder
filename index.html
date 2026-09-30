@@ -45,37 +45,65 @@ button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
 </main>
 <script>
 var drop=document.getElementById("drop"),input=document.getElementById("file"),list=document.getElementById("list");
-var OK=["image/jpeg","image/png","image/gif","image/webp"];
+var OK=["image/jpeg","image/png","image/gif","image/webp"],KEY="riwayat_unggahan";
 
-function send(f){
+function load(){try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return[]}}
+function save(a){try{localStorage.setItem(KEY,JSON.stringify(a))}catch(e){}}
+
+function done(li,r,cached){
+  var meta=li.querySelector(".meta"),bar=li.querySelector(".bar");
+  if(bar)bar.remove();
+  meta.className="meta";meta.innerHTML="";
+  var a=document.createElement("a");a.href=r.url;a.target="_blank";a.rel="noopener";a.textContent=r.url;meta.appendChild(a);
+  var box=document.createElement("div");box.style.cssText="display:flex;gap:6px;flex:none";
+  var c=document.createElement("button");c.type="button";c.textContent="Salin";
+  c.onclick=function(){navigator.clipboard.writeText(r.url).then(function(){c.textContent="Tersalin"})};
+  var d=document.createElement("button");d.type="button";d.textContent="Hapus";
+  d.onclick=function(){
+    if(!confirm("Hapus gambar ini secara permanen? Link-nya akan mati."))return;
+    fetch("/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:r.filename,token:r.deleteToken})})
+    .then(function(x){return x.json().then(function(j){return{ok:x.ok,j:j}})})
+    .then(function(x){
+      if(!x.ok&&x.j.error!=="File tidak ditemukan.")throw new Error(x.j.error||"Gagal");
+      save(load().filter(function(i){return i.filename!==r.filename}));li.remove();
+    }).catch(function(e){meta.textContent=e.message;meta.className="meta err"});
+  };
+  box.appendChild(c);box.appendChild(d);li.appendChild(box);
+}
+
+function row(name,src){
   var li=document.createElement("li");
   li.innerHTML='<img alt=""><div class="info"><div class="name"></div><div class="meta">Mengunggah…</div><div class="bar"><i></i></div></div>';
-  li.querySelector("img").src=URL.createObjectURL(f);
-  li.querySelector(".name").textContent=f.name;
-  list.prepend(li);
+  li.querySelector("img").src=src;li.querySelector(".name").textContent=name;
+  return li;
+}
+
+function send(f){
+  var li=row(f.name,URL.createObjectURL(f));list.prepend(li);
   var meta=li.querySelector(".meta"),bar=li.querySelector(".bar i");
   function fail(t){meta.textContent=t;meta.className="meta err"}
-  if(OK.indexOf(f.type)<0) return fail("Format tidak didukung");
+  if(OK.indexOf(f.type)<0)return fail("Format tidak didukung");
   var fd=new FormData();fd.append("file",f);
   var x=new XMLHttpRequest();x.open("POST","/upload");
   x.upload.onprogress=function(e){if(e.lengthComputable)bar.style.width=(e.loaded/e.total*100)+"%"};
   x.onerror=function(){fail("Koneksi gagal")};
   x.onload=function(){
     var r={};try{r=JSON.parse(x.responseText)}catch(e){}
-    if(x.status!==200||!r.url) return fail(r.error||"Gagal diunggah");
-    bar.parentNode.remove();
-    meta.innerHTML="";var a=document.createElement("a");a.href=r.url;a.target="_blank";a.rel="noopener";a.textContent=r.url;meta.appendChild(a);
-    var b=document.createElement("button");b.type="button";b.textContent="Salin link";
-    b.onclick=function(){navigator.clipboard.writeText(r.url).then(function(){b.textContent="Tersalin"})};
-    li.appendChild(b);
+    if(x.status!==200||!r.url)return fail(r.error||"Gagal diunggah");
+    var h=load();h.unshift({url:r.url,filename:r.filename,name:r.name,deleteToken:r.deleteToken});save(h.slice(0,200));
+    done(li,r);
   };
   x.send(fd);
 }
+
 function add(files){Array.prototype.forEach.call(files,send)}
 input.onchange=function(){add(input.files);input.value=""};
 ["dragenter","dragover"].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.add("over")})});
 ["dragleave","drop"].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.remove("over")})});
 drop.addEventListener("drop",function(ev){add(ev.dataTransfer.files)});
+
+// Riwayat unggahan di browser ini
+load().forEach(function(r){var li=row(r.name,r.url);list.appendChild(li);done(li,r)});
 </script>
 </body>
 </html>
